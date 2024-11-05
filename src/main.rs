@@ -11,6 +11,7 @@ use std::hint::spin_loop;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -23,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     //
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6379").await?;
 
-    let database: Arc<Mutex<HashMap<String, Bytes>>> = Arc::new(Mutex::new(HashMap::default()));
+    let database: Arc<Mutex<HashMap<String, Item>>> = Arc::new(Mutex::new(HashMap::default()));
     while let Ok((mut stream, _socket)) = listener.accept().await {
         let db = database.clone();
         tokio::spawn(async move {
@@ -49,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_frame(
     stream: &mut TcpStream,
     frame: Frame,
-    database: Arc<Mutex<HashMap<String, Bytes>>>,
+    database: Arc<Mutex<HashMap<String, Item>>>,
 ) -> anyhow::Result<()> {
     let command: anyhow::Result<CMD> = (&frame).try_into();
 
@@ -78,16 +79,11 @@ async fn handle_frame(
         CMD::Ping => Frame::Simple("PONG".to_string()).serialize()?,
         CMD::Echo(string) => Frame::Bulk(string.into()).serialize()?,
         CMD::Set { key, value, expire } => {
-            database.lock().unwrap().insert(key.clone(), value);
+            database
+                .lock()
+                .unwrap()
+                .insert(key.clone(), Item { value, expire });
 
-            let db = database.clone();
-            tokio::task::spawn(async move {
-                if expire.is_some() {
-                    let (_time, timeout) = expire.unwrap();
-                    std::thread::sleep(timeout);
-                    db.lock().unwrap().remove(&key);
-                }
-            });
             Frame::Simple("OK".to_string()).serialize()?
         }
         CMD::Get { key } => {
@@ -95,7 +91,13 @@ async fn handle_frame(
             let value = value
                 .get(&key)
                 .take()
-                .map(|val| Frame::Bulk(val.clone()))
+                .map(|val| {
+                    if !val.expired() {
+                        Frame::Bulk(val.value.clone())
+                    } else {
+                        Frame::Null
+                    }
+                })
                 .unwrap_or(Frame::Null);
 
             value.serialize()?
@@ -105,4 +107,19 @@ async fn handle_frame(
     stream.write_all(&response).await?;
 
     Ok(())
+}
+
+#[derive(Debug, Hash)]
+pub struct Item {
+    value: Bytes,
+    expire: Option<(Instant, Duration)>,
+}
+
+impl Item {
+    pub fn expired(&self) -> bool {
+        match self.expire {
+            Some((start, timeout)) => start.clone().elapsed() >= timeout,
+            None => false,
+        }
+    }
 }

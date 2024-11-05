@@ -1,7 +1,7 @@
 use crate::resp::Frame;
 use anyhow::anyhow;
 use bytes::Bytes;
-use std::time::{self, Duration, SystemTime};
+use std::time::{self, Duration, Instant, SystemTime};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum CMD {
@@ -10,7 +10,7 @@ pub enum CMD {
     Set {
         key: String,
         value: Bytes,
-        expire: Option<(time::SystemTime, Duration)>,
+        expire: Option<(time::Instant, Duration)>,
     },
     Get {
         key: String,
@@ -42,7 +42,6 @@ impl TryFrom<&Frame> for CMD {
 }
 
 fn from_vec_cmd(arr: &[Frame]) -> anyhow::Result<CMD> {
-    println!("{:?}", arr);
     if arr.is_empty() {
         return Err(anyhow!("empty array"));
     }
@@ -85,7 +84,7 @@ fn from_vec_cmd(arr: &[Frame]) -> anyhow::Result<CMD> {
 
                 let timeout: u64 = std::str::from_utf8(&arr[4].into_bytes()?)?.parse()?;
 
-                expire = Some((SystemTime::now(), Duration::from_millis(timeout)))
+                expire = Some((Instant::now(), Duration::from_millis(timeout)))
             }
             Ok(CMD::Set { key, value, expire })
         }
