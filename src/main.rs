@@ -7,8 +7,10 @@ use self::resp::Frame;
 use anyhow::anyhow;
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::hint::spin_loop;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -75,8 +77,17 @@ async fn handle_frame(
     let response = match command.unwrap() {
         CMD::Ping => Frame::Simple("PONG".to_string()).serialize()?,
         CMD::Echo(string) => Frame::Bulk(string.into()).serialize()?,
-        CMD::Set { key, value } => {
-            database.lock().unwrap().insert(key, value);
+        CMD::Set { key, value, expire } => {
+            database.lock().unwrap().insert(key.clone(), value);
+
+            let db = database.clone();
+            tokio::task::spawn(async move {
+                if expire.is_some() {
+                    let (_time, timeout) = expire.unwrap();
+                    std::thread::sleep(timeout);
+                    db.lock().unwrap().remove(&key);
+                }
+            });
             Frame::Simple("OK".to_string()).serialize()?
         }
         CMD::Get { key } => {

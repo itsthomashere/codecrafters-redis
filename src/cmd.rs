@@ -1,13 +1,20 @@
 use crate::resp::Frame;
 use anyhow::anyhow;
 use bytes::Bytes;
+use std::time::{self, Duration, SystemTime};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum CMD {
     Ping,
     Echo(String),
-    Set { key: String, value: Bytes },
-    Get { key: String },
+    Set {
+        key: String,
+        value: Bytes,
+        expire: Option<(time::SystemTime, Duration)>,
+    },
+    Get {
+        key: String,
+    },
 }
 
 impl TryFrom<&Frame> for CMD {
@@ -65,10 +72,22 @@ fn from_vec_cmd(arr: &[Frame]) -> anyhow::Result<CMD> {
             }
             let key = std::str::from_utf8(&arr[1].into_bytes()?)?.to_string();
             let value = arr[2].into_bytes()?;
-            Ok(CMD::Set {
-                key,
-                value: value.into(),
-            })
+
+            let mut expire = None;
+            // this mean we have expiry date
+            if arr.len() > 4 {
+                let px = std::str::from_utf8(&arr[3].into_bytes()?)?
+                    .to_string()
+                    .to_lowercase();
+                if px.as_str() != "px" {
+                    return Err(anyhow!("Invalid time syntax"));
+                }
+
+                let timeout: u64 = std::str::from_utf8(&arr[4].into_bytes()?)?.parse()?;
+
+                expire = Some((SystemTime::now(), Duration::from_millis(timeout)))
+            }
+            Ok(CMD::Set { key, value, expire })
         }
         _ => Err(anyhow!("unimplemented command")),
     }
