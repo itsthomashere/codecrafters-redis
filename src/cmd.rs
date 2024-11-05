@@ -64,7 +64,7 @@ fn from_vec_cmd(arr: &[Frame]) -> anyhow::Result<CMD> {
                 return Err(anyhow!("set command without key, or value"));
             }
             let key = std::str::from_utf8(&arr[1].into_bytes()?)?.to_string();
-            let value = arr[2].serialize()?;
+            let value = arr[2].into_bytes()?;
             Ok(CMD::Set {
                 key,
                 value: value.into(),

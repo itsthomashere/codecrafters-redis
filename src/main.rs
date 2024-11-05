@@ -5,7 +5,10 @@ pub mod resp;
 use self::cmd::CMD;
 use self::resp::Frame;
 use anyhow::anyhow;
+use bytes::Bytes;
+use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -18,7 +21,9 @@ async fn main() -> anyhow::Result<()> {
     //
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6379").await?;
 
+    let database: Arc<Mutex<HashMap<String, Bytes>>> = Arc::new(Mutex::new(HashMap::default()));
     while let Ok((mut stream, _socket)) = listener.accept().await {
+        let db = database.clone();
         tokio::spawn(async move {
             loop {
                 let mut buffer = [0; 521];
@@ -31,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
                 let src = buffer.to_vec();
                 let mut src = Cursor::new(src.as_slice());
                 let frame = Frame::parse(&mut src).unwrap();
-                let _ = handle_frame(&mut stream, frame).await;
+                let _ = handle_frame(&mut stream, frame, db.clone()).await;
             }
         });
     }
@@ -39,7 +44,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_frame(stream: &mut TcpStream, frame: Frame) -> anyhow::Result<()> {
+async fn handle_frame(
+    stream: &mut TcpStream,
+    frame: Frame,
+    database: Arc<Mutex<HashMap<String, Bytes>>>,
+) -> anyhow::Result<()> {
     let command: anyhow::Result<CMD> = (&frame).try_into();
 
     if command.is_err() {
@@ -61,20 +70,28 @@ async fn handle_frame(stream: &mut TcpStream, frame: Frame) -> anyhow::Result<()
         return Ok(());
     }
 
-    match command.unwrap() {
-        CMD::Ping => {
-            stream
-                .write_all(&Frame::Simple("PONG".to_string()).serialize()?)
-                .await?;
+    // create response variable to avoid hoding the mutex across
+    // await point
+    let response = match command.unwrap() {
+        CMD::Ping => Frame::Simple("PONG".to_string()).serialize()?,
+        CMD::Echo(string) => Frame::Bulk(string.into()).serialize()?,
+        CMD::Set { key, value } => {
+            database.lock().unwrap().insert(key, value);
+            Frame::Simple("OK".to_string()).serialize()?
         }
-        CMD::Echo(string) => {
-            stream
-                .write_all(&Frame::Bulk(string.into()).serialize()?)
-                .await?;
+        CMD::Get { key } => {
+            let value = database.lock().unwrap();
+            let value = value
+                .get(&key)
+                .take()
+                .map(|val| Frame::Bulk(val.clone()))
+                .unwrap_or(Frame::Null);
+
+            value.serialize()?
         }
-        CMD::Set { .. } => panic!("unimplemented"),
-        CMD::Get { .. } => panic!("unimplemented"),
     };
+
+    stream.write_all(&response).await?;
 
     Ok(())
 }
