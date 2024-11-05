@@ -14,31 +14,6 @@ pub enum Frame {
     Array(Vec<Frame>),
 }
 
-impl Display for Frame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Frame::Simple(string) => write!(f, "+{string}\r\n"),
-            Frame::Error(error) => write!(f, "-{error}\r\n"),
-            Frame::Interger(int) => write!(f, ":{int}\r\n"),
-            Frame::Null => write!(f, "$-1\r\n"),
-            Frame::Bulk(bytes) => {
-                let len = bytes.len();
-                let string = std::str::from_utf8(bytes).unwrap();
-                write!(f, "${len}\r\n{string}\r\n")
-            }
-            Frame::Array(arr) => {
-                let mut output = String::from("");
-                output.push_str(&format!("*{}\r\n", arr.len()));
-
-                for e in arr {
-                    output.push_str(&format!("{}\r\n", e))
-                }
-                write!(f, "{output}")
-            }
-        }
-    }
-}
-
 impl Frame {
     pub fn parse(src: &mut Cursor<&[u8]>) -> anyhow::Result<Frame> {
         match get_u8(src)? {
@@ -65,7 +40,6 @@ impl Frame {
                     Ok(Frame::Null)
                 } else {
                     let len = get_decimal(src)? as usize;
-                    println!("{}", len);
                     let byte_read = len + 2; // include "\r\n": 2 bytes
                     let result = Bytes::copy_from_slice(&src.chunk()[..len]);
 
@@ -85,6 +59,31 @@ impl Frame {
                 Ok(Frame::Array(result))
             }
             _ => Err(anyhow!("unknown protocol")),
+        }
+    }
+
+    pub fn serialize(&self) -> anyhow::Result<Vec<u8>> {
+        match self {
+            Frame::Simple(string) => Ok(format!("+{}\r\n", string).into_bytes()),
+            Frame::Error(error) => Ok(format!("-{}\r\n", error).into_bytes()),
+            Frame::Interger(int) => Ok(format!(":{}\r\n", int).into_bytes()),
+            Frame::Null => Ok(b"$-1\r\n".to_vec()),
+            Frame::Bulk(values) => {
+                Ok(
+                    format!("${}\r\n{}\r\n", values.len(), std::str::from_utf8(values)?)
+                        .into_bytes(),
+                )
+            }
+            Frame::Array(arr) => {
+                let len = arr.len();
+                let mut result = format!("*{}", len).into_bytes();
+
+                for i in arr {
+                    result.append(&mut i.serialize()?);
+                }
+
+                Ok(result)
+            }
         }
     }
 }
