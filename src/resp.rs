@@ -76,7 +76,7 @@ impl Frame {
             }
             Frame::Array(arr) => {
                 let len = arr.len();
-                let mut result = format!("*{}", len).into_bytes();
+                let mut result = format!("*{}\r\n", len).into_bytes();
 
                 for i in arr {
                     result.append(&mut i.serialize()?);
@@ -84,6 +84,17 @@ impl Frame {
 
                 Ok(result)
             }
+        }
+    }
+
+    pub fn into_bytes(&self) -> anyhow::Result<Bytes> {
+        match self {
+            Frame::Simple(string) => Ok(string.clone().into()),
+            Frame::Error(string) => Ok(string.clone().into()),
+            Frame::Interger(_) => Err(anyhow!("integer type can't convert to a bytes")),
+            Frame::Null => Err(anyhow!("null can't convert to bytes")),
+            Frame::Bulk(bytes) => Ok(bytes.clone()),
+            Frame::Array(_) => Err(anyhow!("array -> bytes: unimplemented conversion")),
         }
     }
 }

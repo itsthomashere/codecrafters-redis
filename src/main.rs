@@ -2,6 +2,7 @@
 
 pub mod cmd;
 pub mod resp;
+use self::cmd::CMD;
 use self::resp::Frame;
 use anyhow::anyhow;
 use std::io::Cursor;
@@ -39,128 +40,41 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn handle_frame(stream: &mut TcpStream, frame: Frame) -> anyhow::Result<()> {
-    match frame {
-        Frame::Simple(ref string) => {
-            if string.to_lowercase() == "ping" {
-                let response = frame.serialize();
-                if response.is_err() {
-                    eprintln!("failed to serialize message: {:?}", response);
-                }
-                let response = response.unwrap();
+    let command: anyhow::Result<CMD> = (&frame).try_into();
 
-                stream.write_all(&response).await.unwrap();
-            } else {
-                stream
-                    .write_all(
-                        &frame
-                            .serialize()
-                            .expect("simple string should not fail to serialize"),
-                    )
-                    .await
-                    .unwrap();
-            }
+    if command.is_err() {
+        let response = frame.serialize();
+        if response.is_err() {
+            let error = format!("{:?}", response);
+            stream
+                .write_all(
+                    &Frame::Error(error)
+                        .serialize()
+                        .expect("error frame can't failed to serialize"),
+                )
+                .await?;
+            return Err(response.unwrap_err());
         }
-        Frame::Error(_) => {
-            let response = frame
-                .serialize()
-                .expect("simple error frame can't failed to serialize");
+        let response = response.unwrap();
 
-            stream.write_all(&response).await?;
-        }
-        Frame::Interger(_) => {
-            let response = frame
-                .serialize()
-                .expect("integer frame can't failed to serialzie");
-
-            stream.write_all(&response).await?;
-        }
-        Frame::Null => {
-            let response = frame
-                .serialize()
-                .expect("null frame can't failed to serialize");
-            stream.write_all(&response).await?;
-        }
-        Frame::Bulk(_) => {
-            let response = frame.serialize();
-            if response.is_err() {
-                let error = format!("{:?}", response);
-                stream
-                    .write_all(
-                        &Frame::Error(error)
-                            .serialize()
-                            .expect("error frame can't failed to serialize"),
-                    )
-                    .await?;
-                return Err(response.unwrap_err());
-            }
-            let response = response.unwrap();
-
-            stream.write_all(&response).await?;
-        }
-        Frame::Array(arr) => {
-            let cmd = match &arr[0] {
-                Frame::Bulk(bytes) => {
-                    let message = std::str::from_utf8(bytes);
-                    if message.is_err() {
-                        let error = format!("{:?}", message);
-                        stream
-                            .write_all(
-                                &Frame::Error(error)
-                                    .serialize()
-                                    .expect("error frame can't failed to serialize"),
-                            )
-                            .await?;
-                        return Err(message.unwrap_err().into());
-                    }
-                    message.unwrap_or_default()
-                }
-                _ => panic!("bad request"),
-            };
-
-            match cmd.to_lowercase().as_str() {
-                "echo" => {
-                    if arr.len() < 2 {
-                        eprintln!("Array message len not enough");
-                    }
-
-                    let response = arr[1].serialize();
-                    if response.is_err() {
-                        let error = format!("{:?}", response);
-                        stream
-                            .write_all(
-                                &Frame::Error(error)
-                                    .serialize()
-                                    .expect("error frame can't failed to serialize"),
-                            )
-                            .await?;
-                        return Err(response.unwrap_err());
-                    }
-                    let response = response.unwrap(); // checked
-                                                      //
-                    stream.write_all(&response).await?;
-                }
-                "ping" => {
-                    stream
-                        .write_all(
-                            &Frame::Simple("PONG".to_string())
-                                .serialize()
-                                .expect("valid simple frame"),
-                        )
-                        .await?;
-                }
-
-                _ => {
-                    stream
-                        .write_all(
-                            &Frame::Error(format!("{cmd} is not a command"))
-                                .serialize()
-                                .expect("simple error cannot fail to serialize"),
-                        )
-                        .await?;
-                }
-            }
-        }
+        stream.write_all(&response).await?;
+        return Ok(());
     }
+
+    match command.unwrap() {
+        CMD::Ping => {
+            stream
+                .write_all(&Frame::Simple("PONG".to_string()).serialize()?)
+                .await?;
+        }
+        CMD::Echo(string) => {
+            stream
+                .write_all(&Frame::Bulk(string.into()).serialize()?)
+                .await?;
+        }
+        CMD::Set { .. } => panic!("unimplemented"),
+        CMD::Get { .. } => panic!("unimplemented"),
+    };
 
     Ok(())
 }
