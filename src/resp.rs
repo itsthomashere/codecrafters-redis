@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use bytes::{Buf, Bytes};
-use std::fmt::Display;
 use std::io::Cursor;
 
 #[derive(Debug, Clone, Eq, PartialEq)]

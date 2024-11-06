@@ -1,7 +1,7 @@
 use crate::resp::Frame;
 use anyhow::anyhow;
 use bytes::Bytes;
-use std::time::{self, Duration, Instant, SystemTime};
+use std::time::{self, Duration, Instant};
 
 #[derive(Debug, Eq, PartialEq)]
 #[non_exhaustive]
