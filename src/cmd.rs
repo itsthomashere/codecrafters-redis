@@ -4,6 +4,7 @@ use bytes::Bytes;
 use std::time::{self, Duration, Instant, SystemTime};
 
 #[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CMD {
     Ping,
     Echo(String),
@@ -14,6 +15,10 @@ pub enum CMD {
     },
     Get {
         key: String,
+    },
+    Config {
+        dir: bool,
+        file_name: bool,
     },
 }
 
@@ -87,6 +92,33 @@ fn from_vec_cmd(arr: &[Frame]) -> anyhow::Result<CMD> {
                 expire = Some((Instant::now(), Duration::from_millis(timeout)))
             }
             Ok(CMD::Set { key, value, expire })
+        }
+        "config" => {
+            if arr.len() < 3 {
+                return Err(anyhow!("not enough arguments for config"));
+            };
+            if std::str::from_utf8(&arr[1].into_bytes()?)?
+                .to_lowercase()
+                .as_str()
+                != "get"
+            {
+                return Err(anyhow!("only supported CONFIG GET atm"));
+            }
+
+            let mut dir = false;
+            let mut file_name = false;
+            let iter = arr.iter().skip(2);
+
+            for value in iter {
+                let value = std::str::from_utf8(&value.into_bytes()?)?.to_lowercase();
+                match value.as_str() {
+                    "dir" => dir = true,
+                    "dbfilename" => file_name = true,
+                    _ => return Err(anyhow!("unimplemented config")),
+                }
+            }
+
+            Ok(CMD::Config { dir, file_name })
         }
         _ => Err(anyhow!("unimplemented command")),
     }

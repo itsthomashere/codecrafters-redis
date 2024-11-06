@@ -1,15 +1,17 @@
 #![allow(unused_imports)]
 
 pub mod cmd;
+pub mod rdb;
 pub mod resp;
 use self::cmd::CMD;
+use self::rdb::RDB;
 use self::resp::Frame;
 use anyhow::anyhow;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::hint::spin_loop;
 use std::io::Cursor;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,6 +19,7 @@ use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let rdb = Arc::new(RwLock::new(RDB::build().ok()));
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
@@ -27,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
     let database: Arc<Mutex<HashMap<String, Item>>> = Arc::new(Mutex::new(HashMap::default()));
     while let Ok((mut stream, _socket)) = listener.accept().await {
         let db = database.clone();
+        let r_db = rdb.clone();
         tokio::spawn(async move {
             loop {
                 let mut buffer = [0; 521];
@@ -39,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
                 let src = buffer.to_vec();
                 let mut src = Cursor::new(src.as_slice());
                 let frame = Frame::parse(&mut src).unwrap();
-                let _ = handle_frame(&mut stream, frame, db.clone()).await;
+                let _ = handle_frame(&mut stream, frame, db.clone(), r_db.clone()).await;
             }
         });
     }
@@ -51,6 +55,7 @@ async fn handle_frame(
     stream: &mut TcpStream,
     frame: Frame,
     database: Arc<Mutex<HashMap<String, Item>>>,
+    rdb: Arc<RwLock<Option<RDB>>>,
 ) -> anyhow::Result<()> {
     let command: anyhow::Result<CMD> = (&frame).try_into();
 
@@ -99,6 +104,24 @@ async fn handle_frame(
                     }
                 })
                 .unwrap_or(Frame::Null);
+
+            value.serialize()?
+        }
+        CMD::Config { dir, file_name } => {
+            let mut response: Vec<Frame> = Vec::new();
+            let rdb = rdb.read().unwrap().clone().expect("should be set");
+            if dir {
+                let dir: Bytes = Bytes::from(rdb.dir.to_str().unwrap_or_default().to_string());
+                response.push(Frame::Bulk("dir".into()));
+                response.push(Frame::Bulk(dir))
+            }
+            if file_name {
+                let dir: Bytes = Bytes::from(rdb.file_name.clone());
+                response.push(Frame::Bulk("dbfilename".into()));
+                response.push(Frame::Bulk(dir))
+            }
+
+            let value = Frame::Array(response);
 
             value.serialize()?
         }
