@@ -19,7 +19,7 @@ use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let rdb = Arc::new(RwLock::new(RDB::build().ok()));
+    let rdb = RDB::build().ok();
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     let database: Arc<Mutex<HashMap<String, Item>>> = Arc::new(Mutex::new(HashMap::default()));
     while let Ok((mut stream, _socket)) = listener.accept().await {
         let db = database.clone();
-        let r_db = rdb.clone();
+        let r_db = Arc::new(RwLock::new(rdb.clone()));
         tokio::spawn(async move {
             loop {
                 let mut buffer = [0; 521];
@@ -116,7 +116,7 @@ async fn handle_frame(
                 response.push(Frame::Bulk(dir))
             }
             if file_name {
-                let dir: Bytes = Bytes::from(rdb.file_name.clone());
+                let dir: Bytes = Bytes::from(rdb.file_name);
                 response.push(Frame::Bulk("dbfilename".into()));
                 response.push(Frame::Bulk(dir))
             }
