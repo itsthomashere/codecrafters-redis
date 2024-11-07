@@ -37,8 +37,9 @@ async fn main() -> anyhow::Result<()> {
 
                 let src = buffer.to_vec();
                 let mut src = Cursor::new(src.as_slice());
-                let frame = Frame::parse(&mut src).unwrap();
-                let _ = handle_frame(&mut stream, frame, db.clone(), r_db.clone()).await;
+                while let Ok(frame) = Frame::parse(&mut src) {
+                    let _ = handle_frame(&mut stream, frame, db.clone(), r_db.clone()).await;
+                }
             }
         });
     }
