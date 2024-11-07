@@ -98,7 +98,7 @@ impl Frame {
     }
 }
 
-fn get_u8(src: &mut Cursor<&[u8]>) -> anyhow::Result<u8> {
+pub(crate) fn get_u8(src: &mut Cursor<&[u8]>) -> anyhow::Result<u8> {
     if !src.has_remaining() {
         return Err(anyhow!("no more bytes"));
     }
@@ -106,7 +106,7 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> anyhow::Result<u8> {
     Ok(src.get_u8())
 }
 
-fn peek_u8(src: &mut Cursor<&[u8]>) -> anyhow::Result<u8> {
+pub(crate) fn peek_u8(src: &mut Cursor<&[u8]>) -> anyhow::Result<u8> {
     if !src.has_remaining() {
         return Err(anyhow!("no more bytes"));
     }
@@ -139,7 +139,7 @@ fn get_line<'a>(src: &mut Cursor<&'a [u8]>) -> anyhow::Result<&'a [u8]> {
     Err(anyhow!("could not find end delimiters"))
 }
 
-fn skip(src: &mut Cursor<&[u8]>, n: usize) -> anyhow::Result<()> {
+pub(crate) fn skip(src: &mut Cursor<&[u8]>, n: usize) -> anyhow::Result<()> {
     if src.remaining() < n {
         return Err(anyhow!("no more bytes"));
     }
